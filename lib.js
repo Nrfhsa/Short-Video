@@ -22,10 +22,8 @@ function loadHashMapFromDisk() {
           delete fileHashMap[hash];
           console.log(`Removed missing file from hash map: ${entry.filename}`);
         } else {
-          if (typeof entry.likes !== 'number') entry.likes = 0;
-          if (!Array.isArray(entry.comments)) entry.comments = [];
-          if (typeof entry.title !== 'string') {
-          entry.title = null;
+          if (typeof entry.likes !== 'number') entry.likes = 0;        
+          if (typeof entry.title === 'undefined') entry.title = null;
         }
       }
       saveHashMapToDisk();
