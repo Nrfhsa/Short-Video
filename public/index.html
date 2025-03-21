@@ -29,6 +29,7 @@
     </div>
 
     <form id="uploadForm" class="space-y-4">
+      <!-- File Upload Section -->
       <div class="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center">
         <input type="file" id="video" name="video" 
                accept="video/mp4,video/webm,video/x-matroska" 
@@ -79,19 +80,23 @@
         </p>
       </div>
 
+      <!-- Progress Bar -->
       <div class="progress-container hidden">
         <div class="progress-bar"></div>
         <p class="text-sm text-gray-600 mt-1 text-center" id="progressText"></p>
       </div>
 
+      <!-- Upload Button -->
       <button type="submit" class="w-full bg-blue-500 text-white py-2 rounded-lg hover:bg-blue-600 transition">
         Upload Video
       </button>
 
+      <!-- Messages -->
       <div id="successMessage" class="p-4 bg-green-100 text-green-700 rounded-lg hidden"></div>
       <div id="errorMessage" class="p-4 bg-red-100 text-red-700 rounded-lg hidden"></div>
     </form>
 
+    <!-- Result Section -->
     <div id="result" class="mt-6 hidden">
       <div class="bg-gray-50 p-4 rounded-lg">
         <div class="flex gap-2 mb-4">
@@ -119,7 +124,7 @@
     const successDiv = document.getElementById('successMessage');
     const errorDiv = document.getElementById('errorMessage');
 
-    // Input validation for expiration time
+    // Handle expiration input validation
     expiredInput.addEventListener('input', (e) => {
       const value = e.target.value;
       if (value < 0) {
@@ -128,6 +133,7 @@
       }
     });
 
+    // Update file name display
     videoInput.addEventListener('change', (e) => {
       const file = e.target.files[0];
       if (file) {
@@ -135,27 +141,17 @@
       }
     });
 
+    // Handle form submission
     uploadForm.addEventListener('submit', async (e) => {
       e.preventDefault();
       const formData = new FormData(uploadForm);
       const file = formData.get('video');
       const expiredValue = expiredInput.value.trim();
-      const titleValue = titleInput.value.trim();
 
-      if (!file) {
-        showError('Please select a video file first');
-        return;
-      }
-
-      if (file.size > 100 * 1024 * 1024) {
-        showError('File size exceeds 100MB limit');
-        return;
-      }
-
-      if (expiredValue && isNaN(expiredValue)) {
-        showError('Invalid expiration time. Please enter a number');
-        return;
-      }
+      // Validation
+      if (!file) return showError('Please select a video file first');
+      if (file.size > 100 * 1024 * 1024) return showError('File size exceeds 100MB limit');
+      if (expiredValue && isNaN(expiredValue)) return showError('Invalid expiration time');
 
       resetUI();
       toggleProgress(true);
@@ -163,72 +159,32 @@
       try {
         const xhr = new XMLHttpRequest();
         let url = '/upload';
-
+        
+        // Add expiration parameter if provided
         if (expiredValue !== '') {
           url += `?expired=${encodeURIComponent(expiredValue)}`;
         }
 
-        // Add title to form data if provided
-        if (titleValue) {
-          formData.append('title', titleValue);
-        }
-
+        // Progress handler
         xhr.upload.addEventListener('progress', (e) => {
           const percent = Math.round((e.loaded / e.total) * 100);
           progressBar.style.width = `${percent}%`;
           progressText.textContent = `Uploading ${percent}%`;
         });
 
+        // Response handler
         xhr.addEventListener('load', handleResponse);
         xhr.addEventListener('error', handleError);
-        xhr.addEventListener('abort', handleError);
-
+        
         xhr.open('POST', url);
         xhr.send(formData);
+
       } catch (error) {
         handleError(error);
       }
     });
 
-    function showError(message) {
-      expiredInput.classList.add('invalid-input');
-      errorDiv.textContent = message;
-      errorDiv.classList.remove('hidden');
-      setTimeout(() => {
-        errorDiv.classList.add('hidden');
-        expiredInput.classList.remove('invalid-input');
-      }, 5000);
-    }
-
-    function handleResponse(e) {
-      const xhr = e.target;
-
-      try {
-        const data = JSON.parse(xhr.responseText);
-
-        if (xhr.status >= 200 && xhr.status < 300) {
-          showResult(data.videoUrl);
-          if(data.isDuplicate) {
-            showSuccess('File already exists - expiration time updated');
-          } else {
-            showSuccess('Upload successful!');
-          }
-        } else {
-          showError(data.message || 'Upload failed');
-        }
-      } catch (error) {
-        showError('Invalid server response');
-      } finally {
-        toggleProgress(false);
-      }
-    }
-
-    function handleError(error) {
-      console.error('Upload error:', error);
-      showError('Connection error. Please try again');
-      toggleProgress(false);
-    }
-
+    // Format file size
     function formatBytes(bytes) {
       const units = ['B', 'KB', 'MB', 'GB'];
       let i = 0;
@@ -239,6 +195,36 @@
       return `${bytes.toFixed(1)} ${units[i]}`;
     }
 
+    // Handle server response
+    function handleResponse(e) {
+      const xhr = e.target;
+      try {
+        const data = JSON.parse(xhr.responseText);
+        
+        if (xhr.status >= 200 && xhr.status < 300) {
+          showResult(data.videoUrl);
+          showSuccess(data.isDuplicate ? 
+            'File already exists - metadata updated' : 
+            'Upload successful!'
+          );
+        } else {
+          showError(data.message || 'Upload failed');
+        }
+      } catch (error) {
+        showError('Invalid server response');
+      } finally {
+        toggleProgress(false);
+      }
+    }
+
+    // Error handling
+    function handleError(error) {
+      console.error('Upload error:', error);
+      showError('Connection error. Please try again');
+      toggleProgress(false);
+    }
+
+    // UI functions
     function resetUI() {
       resultDiv.classList.add('hidden');
       successDiv.classList.add('hidden');
@@ -263,6 +249,13 @@
       setTimeout(() => successDiv.classList.add('hidden'), 5000);
     }
 
+    function showError(message) {
+      errorDiv.textContent = message;
+      errorDiv.classList.remove('hidden');
+      setTimeout(() => errorDiv.classList.add('hidden'), 5000);
+    }
+
+    // Copy URL functionality
     document.getElementById('copyBtn').addEventListener('click', () => {
       const urlInput = document.getElementById('urlInput');
       urlInput.select();
