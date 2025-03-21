@@ -2,21 +2,24 @@ const express = require('express');
 const router = express.Router();
 const path = require('path');
 const fs = require('fs');
-const {
-  upload,
+const { 
+  upload, 
   uploadDir,
+  cleanupOldFiles, 
   validateApiKey,
   fileHashMap,
   calculateFileHash
 } = require('./lib');
 
-// Fungsi untuk mengonversi tanggal ke format ISO dengan timezone Jakarta
 function toJakartaISOString(date) {
   const jakartaTime = new Date(date.getTime() + 7 * 60 * 60 * 1000);
   return jakartaTime.toISOString().replace('Z', '+07:00');
 }
 
-// Route untuk upload video
+router.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, './public/index.html'));
+});
+
 router.post('/upload', (req, res) => {
   upload.single('video')(req, res, async (err) => {
     try {
@@ -47,25 +50,22 @@ router.post('/upload', (req, res) => {
       let filename, isDuplicate = false;
       const existingEntry = fileHashMap[fileHash];
 
-      let ttl = 86400000; // Default 24 jam
+      let ttl = 86400000;
       let isPermanent = false;
 
       if (expiredParam) {
         const hours = parseInt(expiredParam);
         if (!isNaN(hours)) {
-          isPermanent = hours === 0;
-          ttl = hours > 0 ? hours * 3600000 : ttl;
+          if (hours === 0) isPermanent = true;
+          else if (hours > 0) ttl = hours * 3600000;
         }
       }
 
       if (existingEntry) {
         isDuplicate = true;
         filename = existingEntry.filename;
-
-        if (title !== null && title !== undefined) {
-          existingEntry.title = String(title); // Pastikan title adalah string
-        }
-
+        if (title !== undefined) existingEntry.title = title;
+        
         if (!existingEntry.isPermanent) {
           existingEntry.expiresAt = isPermanent ? null : Date.now() + ttl;
           existingEntry.isPermanent = isPermanent;
@@ -74,17 +74,12 @@ router.post('/upload', (req, res) => {
         filename = `${fileHash}${ext}`;
         fileHashMap[fileHash] = {
           filename,
-          title: title || null, // Pastikan title adalah string atau null
           expiresAt: isPermanent ? null : Date.now() + ttl,
           isPermanent,
           likes: 0,
-          comments: []
+          comments: [],
+          title
         };
-
-        if (!fs.existsSync(uploadDir)) {
-          fs.mkdirSync(uploadDir, { recursive: true });
-        }
-
         await fs.promises.writeFile(path.join(uploadDir, filename), fileBuffer);
       }
 
@@ -104,26 +99,60 @@ router.post('/upload', (req, res) => {
           title: fileHashMap[fileHash].title
         }
       });
+
     } catch (error) {
       console.error(`Upload error: ${error.message}`);
-      res.status(500).json({
-        success: false,
-        message: 'Upload processing failed'
-      });
+      res.status(500).json({ success: false, message: 'Upload processing failed' });
     }
   });
 });
 
-// Route untuk mendapatkan daftar file
+router.get('/like', (req, res) => {
+  const { video } = req.query;
+  
+  if (!video) return res.status(400).json({ success: false, message: 'Missing video parameter' });
+
+  const entry = Object.values(fileHashMap).find(e => e.filename === video);
+  if (!entry) return res.status(404).json({ success: false, message: 'Video not found' });
+
+  entry.likes = (entry.likes || 0) + 1;
+  res.json({ success: true, likes: entry.likes, message: 'Like added successfully' });
+});
+
+router.get('/comment', (req, res) => {
+  const { text, video } = req.query;
+  
+  if (!text || !video) {
+    return res.status(400).json({ success: false, message: 'Missing text or video parameter' });
+  }
+
+  const entry = Object.values(fileHashMap).find(e => e.filename === video);
+  if (!entry) return res.status(404).json({ success: false, message: 'Video not found' });
+
+  if (!Array.isArray(entry.comments)) entry.comments = [];
+  
+  const newComment = {
+    text,
+    timestamp: new Date().toLocaleString('en-US', { 
+      timeZone: 'Asia/Jakarta',
+      dateStyle: 'full',
+      timeStyle: 'long'
+    })
+  };
+  
+  entry.comments.push(newComment);
+  res.json({ success: true, comment: newComment, message: 'Comment added successfully' });
+});
+
 router.get('/files', validateApiKey, async (req, res) => {
   try {
     const files = [];
 
-    for (const [hash, entry] of Object.entries(fileHashMap)) {
+    for (const entry of Object.values(fileHashMap)) {
       const filePath = path.join(uploadDir, entry.filename);
       try {
         const stats = await fs.promises.stat(filePath);
-
+        
         files.push({
           filename: entry.filename,
           url: `${req.protocol}://${req.get('host')}/video/${entry.filename}`,
@@ -134,11 +163,12 @@ router.get('/files', validateApiKey, async (req, res) => {
           mimetype: getMimeType(path.extname(entry.filename)),
           likes: entry.likes || 0,
           comments: entry.comments || [],
-          title: entry.title || null // Pastikan title adalah string atau null
+          title: entry.title
         });
       } catch (error) {
         if (error.code === 'ENOENT') {
-          delete fileHashMap[hash]; // Hapus entry yang tidak valid
+          const hash = Object.keys(fileHashMap).find(h => fileHashMap[h].filename === entry.filename);
+          if (hash) delete fileHashMap[hash];
         }
       }
     }
@@ -148,13 +178,39 @@ router.get('/files', validateApiKey, async (req, res) => {
       count: files.length,
       files: files.sort((a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt))
     });
+
   } catch (error) {
     console.error(`Files error: ${error.message}`);
     res.status(500).json({ success: false, message: 'Failed to retrieve files' });
   }
 });
 
-// Fungsi untuk mendapatkan MIME type berdasarkan ekstensi file
+router.get('/delete', validateApiKey, async (req, res) => {
+  const { video } = req.query;
+  if (!video) return res.status(400).json({ success: false, message: 'Missing video parameter' });
+
+  try {
+    if (video === 'all') {
+      const files = await fs.promises.readdir(uploadDir);
+      await Promise.all(files.map(file => fs.promises.unlink(path.join(uploadDir, file))));
+      Object.keys(fileHashMap).forEach(key => delete fileHashMap[key]);
+      return res.json({ success: true, message: 'All files deleted successfully' });
+    }
+
+    const filePath = path.join(uploadDir, video);
+    const fileEntry = Object.entries(fileHashMap).find(([hash, e]) => e.filename === video);
+    if (!fileEntry) return res.status(404).json({ success: false, message: 'File not found' });
+
+    await fs.promises.unlink(filePath);
+    delete fileHashMap[fileEntry[0]];
+    res.json({ success: true, message: 'File deleted successfully' });
+
+  } catch (error) {
+    console.error(`Delete error: ${error.message}`);
+    res.status(500).json({ success: false, message: 'Delete operation failed' });
+  }
+});
+
 function getMimeType(ext) {
   return {
     '.mp4': 'video/mp4',
@@ -164,5 +220,10 @@ function getMimeType(ext) {
     '.mov': 'video/quicktime'
   }[ext.toLowerCase()] || 'application/octet-stream';
 }
+
+setInterval(() => {
+  console.log('Running scheduled cleanup...');
+  cleanupOldFiles();
+}, 3600000);
 
 module.exports = router;
