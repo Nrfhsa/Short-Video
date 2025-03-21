@@ -24,7 +24,8 @@ function loadHashMapFromDisk() {
         } else {
           if (typeof entry.likes !== 'number') entry.likes = 0;
           if (!Array.isArray(entry.comments)) entry.comments = [];
-          if (typeof entry.title === 'undefined') entry.title = null;
+          if (typeof entry.title !== 'string') {
+          entry.title = null;
         }
       }
       saveHashMapToDisk();
