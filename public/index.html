@@ -1,0 +1,261 @@
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Video Uploader</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    .progress-bar {
+      height: 5px;
+      background-color: #3b82f6;
+      transition: width 0.3s ease;
+    }
+    #videoPreview {
+      max-height: 50vh;
+      border-radius: 8px;
+    }
+    .invalid-input {
+      border-color: #ef4444 !important;
+      ring-color: #ef4444 !important;
+    }
+  </style>
+</head>
+<body class="bg-gray-100 min-h-screen flex items-center justify-center">
+  <div class="bg-white p-6 rounded-xl shadow-lg w-full max-w-md">
+    <div class="text-center mb-6">
+      <h1 class="text-2xl font-bold text-gray-800">Video Uploader</h1>
+      <p class="text-gray-600 mt-2">Maximum file size 100MB</p>
+    </div>
+
+    <form id="uploadForm" class="space-y-4">
+      <div class="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center">
+        <input type="file" id="video" name="video" 
+               accept="video/mp4,video/webm,video/x-matroska" 
+               class="hidden">
+        <label for="video" class="cursor-pointer">
+          <i class="fas fa-video text-blue-500 text-3xl mb-2"></i>
+          <p class="text-gray-700">Click to select video</p>
+          <p class="text-sm text-gray-500 mt-1" id="fileName"></p>
+        </label>
+      </div>
+
+      <!-- Custom Expiration Input -->
+      <div class="space-y-2">
+        <label class="block text-sm font-medium text-gray-700">
+          Expiration Time (Hours)
+          <span class="text-xs text-gray-500">(0 = Permanent)</span>
+        </label>
+        <div class="relative">
+          <input
+            type="number"
+            name="expired"
+            id="expired"
+            min="0"
+            step="1"
+            placeholder="24 hours (default)"
+            class="w-full p-2 border rounded-lg bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 pr-16"
+          >
+          <div class="absolute inset-y-0 right-2 flex items-center">
+            <span class="text-gray-500">hours</span>
+          </div>
+        </div>
+        <p class="text-xs text-gray-500">
+          * Enter 0 for permanent, 1 for 1 hour, or any number for custom hours. Leave empty for 24 hours.
+        </p>
+      </div>
+
+      <div class="progress-container hidden">
+        <div class="progress-bar"></div>
+        <p class="text-sm text-gray-600 mt-1 text-center" id="progressText"></p>
+      </div>
+
+      <button type="submit" class="w-full bg-blue-500 text-white py-2 rounded-lg hover:bg-blue-600 transition">
+        Upload Video
+      </button>
+
+      <div id="successMessage" class="p-4 bg-green-100 text-green-700 rounded-lg hidden"></div>
+      <div id="errorMessage" class="p-4 bg-red-100 text-red-700 rounded-lg hidden"></div>
+    </form>
+
+    <div id="result" class="mt-6 hidden">
+      <div class="bg-gray-50 p-4 rounded-lg">
+        <div class="flex gap-2 mb-4">
+          <input type="text" id="urlInput" readonly 
+                 class="flex-1 px-3 py-2 border rounded-lg">
+          <button id="copyBtn" 
+                  class="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition">
+            Copy
+          </button>
+        </div>
+        <video id="videoPreview" class="w-full" controls></video>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const uploadForm = document.getElementById('uploadForm');
+    const videoInput = document.getElementById('video');
+    const expiredInput = document.getElementById('expired');
+    const fileName = document.getElementById('fileName');
+    const progressBar = document.querySelector('.progress-bar');
+    const progressText = document.getElementById('progressText');
+    const resultDiv = document.getElementById('result');
+    const successDiv = document.getElementById('successMessage');
+    const errorDiv = document.getElementById('errorMessage');
+
+    // Input validation for expiration time
+    expiredInput.addEventListener('input', (e) => {
+      const value = e.target.value;
+      if (value < 0) {
+        e.target.value = '';
+        showError('Expiration time cannot be negative');
+      }
+    });
+
+    videoInput.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (file) {
+        fileName.textContent = `${file.name} (${formatBytes(file.size)})`;
+      }
+    });
+
+    uploadForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const formData = new FormData(uploadForm);
+      const file = formData.get('video');
+      const expiredValue = expiredInput.value.trim();
+
+      if (!file) {
+        showError('Please select a video file first');
+        return;
+      }
+
+      if (file.size > 100 * 1024 * 1024) {
+        showError('File size exceeds 100MB limit');
+        return;
+      }
+
+      // Validate expiration input
+      if (expiredValue && isNaN(expiredValue)) {
+        showError('Invalid expiration time. Please enter a number');
+        return;
+      }
+
+      resetUI();
+      toggleProgress(true);
+
+      try {
+        const xhr = new XMLHttpRequest();
+        let url = '/upload';
+
+        // Add expiration parameter if provided
+        if (expiredValue !== '') {
+          url += `?expired=${encodeURIComponent(expiredValue)}`;
+        }
+
+        xhr.upload.addEventListener('progress', (e) => {
+          const percent = Math.round((e.loaded / e.total) * 100);
+          progressBar.style.width = `${percent}%`;
+          progressText.textContent = `Uploading ${percent}%`;
+        });
+
+        xhr.addEventListener('load', handleResponse);
+        xhr.addEventListener('error', handleError);
+        xhr.addEventListener('abort', handleError);
+
+        xhr.open('POST', url);
+        xhr.send(formData);
+      } catch (error) {
+        handleError(error);
+      }
+    });
+
+    function showError(message) {
+      expiredInput.classList.add('invalid-input');
+      errorDiv.textContent = message;
+      errorDiv.classList.remove('hidden');
+      setTimeout(() => {
+        errorDiv.classList.add('hidden');
+        expiredInput.classList.remove('invalid-input');
+      }, 5000);
+    }
+
+    function handleResponse(e) {
+      const xhr = e.target;
+
+      try {
+        const data = JSON.parse(xhr.responseText);
+
+        if (xhr.status >= 200 && xhr.status < 300) {
+          showResult(data.videoUrl);
+          if(data.isDuplicate) {
+            showSuccess('File already exists - expiration time updated');
+          } else {
+            showSuccess('Upload successful!');
+          }
+        } else {
+          showError(data.message || 'Upload failed');
+        }
+      } catch (error) {
+        showError('Invalid server response');
+      } finally {
+        toggleProgress(false);
+      }
+    }
+
+    function handleError(error) {
+      console.error('Upload error:', error);
+      showError('Connection error. Please try again');
+      toggleProgress(false);
+    }
+
+    function formatBytes(bytes) {
+      const units = ['B', 'KB', 'MB', 'GB'];
+      let i = 0;
+      while (bytes >= 1024 && i < units.length - 1) {
+        bytes /= 1024;
+        i++;
+      }
+      return `${bytes.toFixed(1)} ${units[i]}`;
+    }
+
+    function resetUI() {
+      resultDiv.classList.add('hidden');
+      successDiv.classList.add('hidden');
+      errorDiv.classList.add('hidden');
+    }
+
+    function toggleProgress(show) {
+      document.querySelector('.progress-container').classList.toggle('hidden', !show);
+      progressBar.style.width = '0%';
+      progressText.textContent = '';
+    }
+
+    function showResult(url) {
+      document.getElementById('urlInput').value = url;
+      document.getElementById('videoPreview').src = url;
+      resultDiv.classList.remove('hidden');
+    }
+
+    function showError(message) {
+      errorDiv.textContent = message;
+      errorDiv.classList.remove('hidden');
+      setTimeout(() => errorDiv.classList.add('hidden'), 5000);
+    }
+
+    function showSuccess(message) {
+      successDiv.textContent = message;
+      successDiv.classList.remove('hidden');
+      setTimeout(() => successDiv.classList.add('hidden'), 5000);
+    }
+
+    document.getElementById('copyBtn').addEventListener('click', () => {
+      const urlInput = document.getElementById('urlInput');
+      urlInput.select();
+      document.execCommand('copy');
+      showSuccess('URL copied successfully!');
+    });
+  </script>
+</body>
+</html>
