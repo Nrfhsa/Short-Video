@@ -70,29 +70,26 @@ router.post('/upload', (req, res) => {
           ttl = hours > 0 ? hours * 3600000 : ttl;
         }
       }
-
-      // Handle existing entry
+      
       if (existingEntry) {
         isDuplicate = true;
         filename = existingEntry.filename;
-        
-        // Update metadata
-        if (title !== null) existingEntry.title = title;
-        if (!existingEntry.isPermanent) {
-          existingEntry.expiresAt = isPermanent ? null : Date.now() + ttl;
-          existingEntry.isPermanent = isPermanent;
+      
+        // Update title jika disertakan
+        if (title !== null && title !== undefined) {
+          existingEntry.title = String(title); // Pastikan title adalah string
         }
       } else {
-        // Buat entry baru
         filename = `${fileHash}${ext}`;
         fileHashMap[fileHash] = {
           filename,
+          title: title || null, // Pastikan title adalah string atau null
           expiresAt: isPermanent ? null : Date.now() + ttl,
           isPermanent,
           likes: 0,
-          comments: [],
-          title
+          comments: []
         };
+      }
 
         // Double-check directory sebelum write file
         if (!fs.existsSync(uploadDir)) {
