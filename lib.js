@@ -3,7 +3,7 @@ const fs = require('fs');
 const crypto = require('crypto');
 const multer = require('multer');
 
-const uploadDir = path.join(__dirname, 'public/videos');
+const uploadDir = path.join(process.cwd(), 'public/videos');
 const hashMapFile = path.join(__dirname, 'file-hash-map.json');
 const maxFileSize = 100 * 1024 * 1024;
 
