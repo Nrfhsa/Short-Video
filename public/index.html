@@ -40,7 +40,21 @@
         </label>
       </div>
 
-      <!-- Custom Expiration Input -->
+      <!-- Title Input -->
+      <div class="space-y-2">
+        <label class="block text-sm font-medium text-gray-700">
+          Video Title (Optional)
+        </label>
+        <input
+          type="text"
+          name="title"
+          id="title"
+          placeholder="Enter video title"
+          class="w-full p-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+        >
+      </div>
+
+      <!-- Expiration Input -->
       <div class="space-y-2">
         <label class="block text-sm font-medium text-gray-700">
           Expiration Time (Hours)
@@ -97,6 +111,7 @@
     const uploadForm = document.getElementById('uploadForm');
     const videoInput = document.getElementById('video');
     const expiredInput = document.getElementById('expired');
+    const titleInput = document.getElementById('title');
     const fileName = document.getElementById('fileName');
     const progressBar = document.querySelector('.progress-bar');
     const progressText = document.getElementById('progressText');
@@ -125,6 +140,7 @@
       const formData = new FormData(uploadForm);
       const file = formData.get('video');
       const expiredValue = expiredInput.value.trim();
+      const titleValue = titleInput.value.trim();
 
       if (!file) {
         showError('Please select a video file first');
@@ -136,7 +152,6 @@
         return;
       }
 
-      // Validate expiration input
       if (expiredValue && isNaN(expiredValue)) {
         showError('Invalid expiration time. Please enter a number');
         return;
@@ -149,9 +164,13 @@
         const xhr = new XMLHttpRequest();
         let url = '/upload';
 
-        // Add expiration parameter if provided
         if (expiredValue !== '') {
           url += `?expired=${encodeURIComponent(expiredValue)}`;
+        }
+
+        // Add title to form data if provided
+        if (titleValue) {
+          formData.append('title', titleValue);
         }
 
         xhr.upload.addEventListener('progress', (e) => {
@@ -236,12 +255,6 @@
       document.getElementById('urlInput').value = url;
       document.getElementById('videoPreview').src = url;
       resultDiv.classList.remove('hidden');
-    }
-
-    function showError(message) {
-      errorDiv.textContent = message;
-      errorDiv.classList.remove('hidden');
-      setTimeout(() => errorDiv.classList.add('hidden'), 5000);
     }
 
     function showSuccess(message) {
