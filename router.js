@@ -23,6 +23,7 @@ router.get('/', (req, res) => {
 router.post('/upload', (req, res) => {
   upload.single('video')(req, res, async (err) => {
     try {
+      // Error handling untuk upload
       if (err) {
         const errorMap = {
           LIMIT_FILE_SIZE: { message: 'File size exceeds 100MB limit', status: 413 },
@@ -41,6 +42,14 @@ router.post('/upload', (req, res) => {
         });
       }
 
+      // Setup path dan direktori
+      const uploadDir = path.join(process.cwd(), 'public/videos');
+      if (!fs.existsSync(uploadDir)) {
+        fs.mkdirSync(uploadDir, { recursive: true, mode: 0o755 });
+        console.log(`Created upload directory at: ${uploadDir}`);
+      }
+
+      // Proses file
       const fileBuffer = req.file.buffer;
       const fileHash = calculateFileHash(fileBuffer);
       const ext = path.extname(req.file.originalname).toLowerCase();
@@ -50,27 +59,31 @@ router.post('/upload', (req, res) => {
       let filename, isDuplicate = false;
       const existingEntry = fileHashMap[fileHash];
 
-      let ttl = 86400000;
+      // TTL configuration
+      let ttl = 86400000; // 24 jam default
       let isPermanent = false;
 
       if (expiredParam) {
         const hours = parseInt(expiredParam);
         if (!isNaN(hours)) {
-          if (hours === 0) isPermanent = true;
-          else if (hours > 0) ttl = hours * 3600000;
+          isPermanent = hours === 0;
+          ttl = hours > 0 ? hours * 3600000 : ttl;
         }
       }
 
+      // Handle existing entry
       if (existingEntry) {
         isDuplicate = true;
         filename = existingEntry.filename;
-        if (title !== undefined) existingEntry.title = title;
         
+        // Update metadata
+        if (title !== null) existingEntry.title = title;
         if (!existingEntry.isPermanent) {
           existingEntry.expiresAt = isPermanent ? null : Date.now() + ttl;
           existingEntry.isPermanent = isPermanent;
         }
       } else {
+        // Buat entry baru
         filename = `${fileHash}${ext}`;
         fileHashMap[fileHash] = {
           filename,
@@ -80,17 +93,35 @@ router.post('/upload', (req, res) => {
           comments: [],
           title
         };
-        await fs.promises.writeFile(path.join(uploadDir, filename), fileBuffer);
+
+        // Double-check directory sebelum write file
+        if (!fs.existsSync(uploadDir)) {
+          fs.mkdirSync(uploadDir, { recursive: true });
+        }
+
+        // Tulis file dengan error handling
+        try {
+          await fs.promises.writeFile(path.join(uploadDir, filename), fileBuffer);
+        } catch (writeError) {
+          if (writeError.code === 'ENOENT') {
+            fs.mkdirSync(uploadDir, { recursive: true });
+            await fs.promises.writeFile(path.join(uploadDir, filename), fileBuffer);
+          } else {
+            throw writeError;
+          }
+        }
       }
 
+      // Build response
       const videoUrl = `${req.protocol}://${req.get('host')}/video/${filename}`;
-
+      
       res.status(201).json({
         success: true,
         message: isDuplicate ? 'File already exists' : 'Upload successful',
         videoUrl,
         isDuplicate,
-        expiresAt: fileHashMap[fileHash].expiresAt ? toJakartaISOString(new Date(fileHashMap[fileHash].expiresAt)) : null,
+        expiresAt: fileHashMap[fileHash].expiresAt ? 
+          new Date(fileHashMap[fileHash].expiresAt).toISOString() : null,
         isPermanent: fileHashMap[fileHash].isPermanent,
         fileInfo: {
           filename,
@@ -101,8 +132,14 @@ router.post('/upload', (req, res) => {
       });
 
     } catch (error) {
-      console.error(`Upload error: ${error.message}`);
-      res.status(500).json({ success: false, message: 'Upload processing failed' });
+      console.error(`[UPLOAD ERROR] ${error.message}`);
+      console.error(error.stack);
+      
+      res.status(500).json({
+        success: false,
+        message: 'Upload processing failed',
+        error: process.env.NODE_ENV === 'development' ? error.message : null
+      });
     }
   });
 });
